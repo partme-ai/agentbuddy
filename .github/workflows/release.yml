@@ -24,8 +24,7 @@ jobs:
         with:
           repository: partme-ai/workbuddy-agent-experts
           path: workbuddy-agent-experts
-          # repo is public; default token suffices (SKILLS_SYNC_TOKEN kept as fallback)
-          token: ${{ secrets.SKILLS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          # public repo: default GITHUB_TOKEN only (org policy rejects the PAT)
       - name: Link the experts resource tree
         shell: bash
         run: ln -sfn "$PWD/workbuddy-agent-experts/experts" "$PWD/agentbuddy/experts"

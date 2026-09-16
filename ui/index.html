@@ -10,6 +10,14 @@
   header { padding: 14px 18px; border-bottom: 1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   .pill { background:#1e242e; border:1px solid var(--line); border-radius:20px; padding:4px 12px; font-size:12px; color:var(--muted); max-width:70vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pill b { color: var(--text); }
+  .runtimes { display:flex; gap:10px; padding:12px 18px 0; flex-wrap:wrap; }
+  .rt-card { flex:1; min-width:200px; background:var(--card); border:2px solid var(--line); border-radius:12px; padding:10px 14px; cursor:pointer; }
+  .rt-card.active { border-color: var(--accent); }
+  .rt-card .rt-name { font-weight:700; }
+  .rt-card .rt-status { font-size:11px; margin-top:3px; }
+  .rt-card .rt-ok { color:#34d399; }
+  .rt-card .rt-missing { color:#f87171; }
+  .rt-card a { color:#8ab4ff; font-size:11px; }
   .tabs { display:flex; gap:6px; padding: 10px 18px 0; }
   .tab { padding:6px 14px; border-radius:8px 8px 0 0; background:#151923; border:1px solid var(--line); border-bottom:none; color:var(--muted); cursor:pointer; }
   .tab.active { background: var(--card); color: var(--text); }
@@ -39,6 +47,7 @@
 <header>
   <div class="pill" id="detect-pill">检测中…</div>
 </header>
+<div class="runtimes" id="runtimes"></div>
 <div class="tabs">
   <div class="tab active" data-tab="all">全部</div>
   <div class="tab" data-tab="team">专家团</div>
@@ -66,6 +75,8 @@ let catalog = [];
 let selected = new Set();
 let configDir = null;
 let activeTab = "all";
+let activeRuntime = "workbuddy";
+let runtimeStates = [];
 let query = "";
 
 const listEl = document.getElementById('list');
@@ -189,8 +200,10 @@ uninstallBtn.onclick = async () => {
   uninstallBtn.disabled = true;
   progressEl.textContent = '卸载中…';
   try {
-    const n = await invoke('uninstall', { names: [...selected], configDir });
-    progressEl.textContent = `🗑 已卸载 ${n} 个插件（注册表同步清理）。重启 WorkBuddy 生效。`;
+    const n = activeRuntime === 'workbuddy'
+      ? await invoke('uninstall', { names: [...selected], configDir })
+      : await invoke('runtime_uninstall', { runtime: activeRuntime, names: [...selected], configDir });
+    progressEl.textContent = `🗑 已从 ${activeRuntime} 卸载 ${n} 项（注册表同步清理）。`;
   } catch (e) {
     progressEl.textContent = '❌ 卸载失败：' + e;
   }
@@ -202,8 +215,10 @@ installBtn.onclick = async () => {
   installBtn.disabled = true;
   progressEl.textContent = '安装中…';
   try {
-    const n = await invoke('install', { names: [...selected], configDir });
-    progressEl.textContent = `✅ 成功安装 ${n} 个插件。请重启 WorkBuddy 加载。`;
+    const n = activeRuntime === 'workbuddy'
+      ? await invoke('install', { names: [...selected], configDir })
+      : await invoke('runtime_install', { runtime: activeRuntime, names: [...selected], configDir });
+    progressEl.textContent = `✅ 成功安装 ${n} 项到 ${activeRuntime}。${activeRuntime === 'workbuddy' ? '请重启 WorkBuddy 加载。' : ''}`;
   } catch (e) {
     progressEl.textContent = '❌ 安装失败：' + e;
   }
@@ -211,10 +226,29 @@ installBtn.onclick = async () => {
   uninstallBtn.disabled = selected.size === 0;
 };
 
+async function renderRuntimes() {
+  try {
+    runtimeStates = await invoke('runtime_status');
+  } catch (e) { runtimeStates = []; }
+  const el = document.getElementById('runtimes');
+  el.innerHTML = '';
+  for (const r of runtimeStates) {
+    const card = document.createElement('div');
+    card.className = 'rt-card' + (r.runtime === activeRuntime ? ' active' : '');
+    const status = r.installed
+      ? `<span class="rt-status rt-ok">✓ 已检测到</span>`
+      : `<span class="rt-status rt-missing">未检测到 · <a href="${r.install_hint_url}" target="_blank">${r.install_hint_title}</a></span>`;
+    card.innerHTML = `<div class="rt-name">${r.display_name}</div>${status}`;
+    card.onclick = () => { activeRuntime = r.runtime; renderRuntimes(); render(); };
+    el.appendChild(card);
+  }
+}
+
 (async () => {
   catalog = await invoke('catalog');
   for (const name of VIDEO_PRESELECT) if (catalog.some(p => p.name === name)) selected.add(name);
   refreshDetect();
+  await renderRuntimes();
   render();
 })();
 </script>

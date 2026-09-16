@@ -6,6 +6,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod runtime_adapters;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PluginInfo {
     name: String,
@@ -26,6 +28,11 @@ struct DetectResult {
 }
 
 fn expand_home(path: &str) -> PathBuf {
+    if path == "~" {
+        if let Some(home) = env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = env::var_os("HOME") {
             return PathBuf::from(home).join(rest);
@@ -406,6 +413,57 @@ fn uninstall(names: Vec<String>, config_dir: Option<String>) -> Result<usize, St
     uninstall_selected(&names, &dir)
 }
 
+// ────────── 多运行时（WorkBuddy / OpenClaw / ZQClaw / Hermes）──────────
+
+fn workbuddy_engine<'a>(experts: &'a Path, config_dir: &'a Path) -> impl Fn(&[String]) -> Result<usize, String> + 'a {
+    move |names: &[String]| {
+        let catalog = list_plugins(experts);
+        let picked: Vec<PluginInfo> = catalog
+            .into_iter()
+            .filter(|p| names.contains(&p.name))
+            .collect();
+        install_selected(&picked, experts, config_dir).map_err(|e| e.to_string())
+    }
+}
+
+fn parse_runtime(s: &str) -> Result<runtime_adapters::TargetRuntime, String> {
+    match s {
+        "workbuddy" => Ok(runtime_adapters::TargetRuntime::Workbuddy),
+        "openclaw" => Ok(runtime_adapters::TargetRuntime::Openclaw),
+        "zqclaw" => Ok(runtime_adapters::TargetRuntime::Zqclaw),
+        "hermes" => Ok(runtime_adapters::TargetRuntime::Hermes),
+        other => Err(format!("unknown runtime: {}", other)),
+    }
+}
+
+#[tauri::command]
+fn runtime_status() -> Vec<runtime_adapters::RuntimeStatus> {
+    runtime_adapters::detect_runtimes(&expand_home("~"))
+}
+
+#[tauri::command]
+fn runtime_install(runtime: String, names: Vec<String>, config_dir: Option<String>) -> Result<usize, String> {
+    let rt = parse_runtime(&runtime)?;
+    let experts = experts_root();
+    let dir = config_dir
+        .map(|d| expand_home(&d))
+        .unwrap_or_else(|| expand_home("~/.workbuddy"));
+    let home = expand_home("~");
+    let engine = workbuddy_engine(&experts, &dir);
+    runtime_adapters::install_plugins(rt, &home, &experts, &names, &engine)
+}
+
+#[tauri::command]
+fn runtime_uninstall(runtime: String, names: Vec<String>, config_dir: Option<String>) -> Result<usize, String> {
+    let rt = parse_runtime(&runtime)?;
+    let dir = config_dir
+        .map(|d| expand_home(&d))
+        .unwrap_or_else(|| expand_home("~/.workbuddy"));
+    let experts = experts_root();
+    let engine = workbuddy_engine(&experts, &dir);
+    runtime_adapters::uninstall_plugins(rt, &expand_home("~"), &names, &engine)
+}
+
 #[tauri::command]
 fn pick_config_dir() -> Option<String> {
     None // 前端用 dialog plugin 替代；占位以保持 invoke 面稳定
@@ -451,6 +509,22 @@ fn cli_main() -> i32 {
             }
         };
     }
+    if let Some(rt_name) = args.windows(2).find(|w| w[0] == "--runtime").map(|w| w[1].clone()) {
+        let rt = match parse_runtime(&rt_name) { Ok(r) => r, Err(e) => { eprintln!("{}", e); return 1; } };
+        let home = expand_home("~");
+        let engine = |names: &[String]| -> Result<usize, String> {
+            let catalog = list_plugins(&experts);
+            let picked: Vec<PluginInfo> = catalog
+                .into_iter()
+                .filter(|p| names.contains(&p.name))
+                .collect();
+            install_selected(&picked, &experts, &dir).map_err(|e| e.to_string())
+        };
+        return match runtime_adapters::install_plugins(rt, &home, &experts, &names, &engine) {
+            Ok(n) => { println!("installed {} entries into {} ({})", n, home.join(format!(".{}", rt_name)).display(), rt_name); 0 }
+            Err(e) => { eprintln!("install failed: {}", e); 1 }
+        };
+    }
     match install_selected(&selected, &experts, &dir) {
         Ok(n) => {
             println!("installed {} plugins into {}", n, dir.join("plugins/marketplaces/my-experts").display());
@@ -470,7 +544,7 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![detect, catalog, plugin_icon, install, uninstall, pick_config_dir])
+        .invoke_handler(tauri::generate_handler![detect, catalog, plugin_icon, install, uninstall, runtime_status, runtime_install, runtime_uninstall, pick_config_dir])
         .run(tauri::generate_context!())
         .expect("error while running AgentBuddy");
 }

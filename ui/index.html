@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AgentBuddy — WorkBuddy 智能体安装器</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e7eaf0; --muted:#8b93a3; --accent:#6d28d9; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 14px 18px; border-bottom: 1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .pill { background:#1e242e; border:1px solid var(--line); border-radius:20px; padding:4px 12px; font-size:12px; color:var(--muted); max-width:70vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pill b { color: var(--text); }
+  .tabs { display:flex; gap:6px; padding: 10px 18px 0; }
+  .tab { padding:6px 14px; border-radius:8px 8px 0 0; background:#151923; border:1px solid var(--line); border-bottom:none; color:var(--muted); cursor:pointer; }
+  .tab.active { background: var(--card); color: var(--text); }
+  .toolbar { display:flex; gap:10px; padding:10px 18px; align-items:center; }
+  input[type=search] { flex:1; background:#0c0f14; border:1px solid var(--line); border-radius:8px; color:var(--text); padding:8px 12px; outline:none; }
+  button.ghost { background:none; border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:8px 12px; cursor:pointer; }
+  button.ghost:hover { color:var(--text); }
+  main { height: calc(100vh - 230px); overflow-y:auto; padding: 0 18px 12px; background: var(--card); margin: 0 18px; border:1px solid var(--line); border-radius: 0 0 12px 12px; }
+  .row { display:flex; gap:10px; align-items:flex-start; padding:10px 6px; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:none; }
+  .row img { width:34px; height:34px; border-radius:9px; flex:none; margin-top:2px; }
+  .row .meta { flex:1; min-width:0; }
+  .row .name { font-weight:600; }
+  .row .desc { color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .ver { color:var(--muted); font-size:11px; flex:none; padding-top:3px; }
+  .row input[type=checkbox] { width:16px; height:16px; margin-top:10px; accent-color: var(--accent); }
+  footer { display:flex; gap:12px; align-items:center; padding:12px 18px; border-top:1px solid var(--line); }
+  #count { color:var(--muted); }
+  #install { background: var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 22px; font-size:14px; font-weight:600; cursor:pointer; margin-left:auto; }
+  #install:disabled { opacity:.5; cursor:default; }
+  #progress { color: var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55vw; }
+  .empty { padding:30px; color:var(--muted); text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <div class="pill" id="detect-pill">检测中…</div>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="all">全部</div>
+  <div class="tab" data-tab="team">专家团</div>
+  <div class="tab" data-tab="agent">单专家</div>
+</div>
+<div class="toolbar">
+  <input type="search" id="q" placeholder="搜索名称或描述…（如：视频 / rust / 情报）">
+  <button class="ghost" id="sel-video">仅选视频制作</button>
+  <button class="ghost" id="sel-none">清空</button>
+</div>
+<main id="list"><div class="empty">读取中…</div></main>
+<footer>
+  <span id="count"></span>
+  <span id="progress"></span>
+  <button id="install" disabled>安装所选</button>
+</footer>
+<script>
+const { invoke } = window.__TAURI__.core;
+const VIDEO_PRESELECT = ["video-factory-team","short-drama-studio-team","dreamina-design-team","dreamina-canvas-team","dreamina-3d-team"];
+
+let catalog = [];
+let selected = new Set();
+let configDir = null;
+let activeTab = "all";
+let query = "";
+
+const listEl = document.getElementById('list');
+const countEl = document.getElementById('count');
+const progressEl = document.getElementById('progress');
+const installBtn = document.getElementById('install');
+const detectPill = document.getElementById('detect-pill');
+
+async function refreshDetect() {
+  try {
+    const r = await invoke('detect');
+    const app = r.app_path ? `WorkBuddy 已检测到：<b>${r.app_path}</b>` : '未检测到 WorkBuddy（可继续安装）';
+    detectPill.innerHTML = `${app}　|　安装位置：<b id="cfg">${configDir || r.config_dir}</b>　<a href="#" id="change" style="color:var(--accent)">更改…</a>`;
+    if (!configDir) configDir = r.config_dir;
+    document.getElementById('change').onclick = async (e) => {
+      e.preventDefault();
+      try {
+        const path = await window.__TAURI__.dialog.open({ directory: true, defaultPath: configDir, title: '选择 WorkBuddy 配置目录' });
+        if (path) { configDir = path; refreshDetect(); }
+      } catch {}
+    };
+  } catch (e) {
+    detectPill.textContent = '检测失败：' + e;
+  }
+}
+
+function fmtIcon(imgBytes) {
+  if (!imgBytes) return null;
+  let bin = '';
+  for (let i = 0; i < imgBytes.length; i++) bin += String.fromCharCode(imgBytes[i]);
+  return 'data:image/png;base64,' + btoa(bin);
+}
+
+const iconCache = new Map();
+async function iconFor(name) {
+  if (iconCache.has(name)) return iconCache.get(name);
+  try {
+    const bytes = await invoke('plugin_icon', { name });
+    const url = fmtIcon(bytes);
+    iconCache.set(name, url);
+    return url;
+  } catch { return null; }
+}
+
+function matches(p) {
+  if (activeTab === 'team' && !p.is_team) return false;
+  if (activeTab === 'agent' && p.is_team) return false;
+  if (query) {
+    const q = query.toLowerCase();
+    return p.name.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
+  }
+  return true;
+}
+
+async function render() {
+  const items = catalog.filter(matches);
+  if (!items.length) { listEl.innerHTML = '<div class="empty">没有匹配的插件</div>'; return; }
+  listEl.innerHTML = '';
+  for (const p of items) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selected.has(p.name);
+    cb.onchange = () => { cb.checked ? selected.add(p.name) : selected.delete(p.name); updateCount(); };
+
+    let img;
+    const iconUrl = await iconFor(p.name);
+    if (iconUrl) { img = document.createElement('img'); img.src = iconUrl; } else { img = document.createElement('div'); img.style.width='34px'; img.style.height='34px'; }
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<div class="name"></div><div class="desc"></div>`;
+    meta.querySelector('.name').textContent = p.display_name;
+    meta.querySelector('.desc').textContent = p.description;
+    const ver = document.createElement('span');
+    ver.className = 'ver';
+    ver.textContent = 'v' + p.version;
+    row.append(cb, img, meta, ver);
+    listEl.appendChild(row);
+  }
+  updateCount();
+}
+
+function updateCount() {
+  const t = catalog.filter(p => p.is_team && selected.has(p.name)).length;
+  const a = catalog.filter(p => !p.is_team && selected.has(p.name)).length;
+  countEl.textContent = `已选：${t} 个专家团、${a} 个单专家`;
+  installBtn.disabled = selected.size === 0;
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    activeTab = tab.dataset.tab;
+    render();
+  };
+});
+document.getElementById('q').oninput = (e) => { query = e.target.value.trim(); render(); };
+document.getElementById('sel-video').onclick = () => {
+  selected = new Set(VIDEO_PRESELECT.filter(n => catalog.some(p => p.name === n)));
+  render();
+};
+document.getElementById('sel-none').onclick = () => { selected.clear(); render(); };
+
+installBtn.onclick = async () => {
+  if (!selected.size) return;
+  installBtn.disabled = true;
+  progressEl.textContent = '安装中…';
+  try {
+    const n = await invoke('install', { names: [...selected], configDir });
+    progressEl.textContent = `✅ 成功安装 ${n} 个插件。请重启 WorkBuddy 加载。`;
+  } catch (e) {
+    progressEl.textContent = '❌ 安装失败：' + e;
+  }
+  installBtn.disabled = selected.size === 0;
+};
+
+(async () => {
+  catalog = await invoke('catalog');
+  for (const name of VIDEO_PRESELECT) if (catalog.some(p => p.name === name)) selected.add(name);
+  refreshDetect();
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentBuddy",
+  "identifier": "ai.partme.agentbuddy",
+  "version": "1.0.0",
+  "mainBinaryName": "agentbuddy",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": ""
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../experts": "experts/"
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

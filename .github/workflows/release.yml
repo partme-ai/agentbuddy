@@ -12,9 +12,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14 }
-          - { os: windows-latest }
-          - { os: ubuntu-24.04 }
+          - { os: macos-14, bundle_glob: "agentbuddy/src-tauri/target/release/bundle/dmg/*.dmg" }
+          - { os: windows-latest, bundle_glob: "agentbuddy/src-tauri/target/release/bundle/{nsis,msi}/**" }
+          - { os: ubuntu-24.04, bundle_glob: "agentbuddy/src-tauri/target/release/bundle/{appimage,deb}/**" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +44,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: agentbuddy/src-tauri
+      - name: Upload built bundles as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ runner.os }}
+          path: ${{ matrix.bundle_glob }}
 
   upload-release-assets:
     needs: bundle

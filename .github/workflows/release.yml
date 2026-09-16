@@ -24,6 +24,7 @@ jobs:
         with:
           repository: partme-ai/workbuddy-agent-experts
           path: workbuddy-agent-experts
+          token: ${{ secrets.SKILLS_SYNC_TOKEN }}
       - name: Link the experts resource tree
         shell: bash
         run: ln -sfn "$PWD/workbuddy-agent-experts/experts" "$PWD/agentbuddy/experts"

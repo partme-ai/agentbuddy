@@ -29,7 +29,8 @@
   footer { display:flex; gap:12px; align-items:center; padding:12px 18px; border-top:1px solid var(--line); }
   #count { color:var(--muted); }
   #install { background: var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 22px; font-size:14px; font-weight:600; cursor:pointer; margin-left:auto; }
-  #install:disabled { opacity:.5; cursor:default; }
+  #install:disabled, #uninstall:disabled { opacity:.5; cursor:default; }
+  #uninstall { background: #b91c1c; color:#fff; border:none; border-radius:10px; padding:10px 22px; font-size:14px; font-weight:600; cursor:pointer; }
   #progress { color: var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55vw; }
   .empty { padding:30px; color:var(--muted); text-align:center; }
 </style>
@@ -45,6 +46,8 @@
 </div>
 <div class="toolbar">
   <input type="search" id="q" placeholder="搜索名称或描述…（如：视频 / rust / 情报）">
+  <button class="ghost" id="sel-all">全选</button>
+  <button class="ghost" id="sel-invert">反选</button>
   <button class="ghost" id="sel-video">仅选视频制作</button>
   <button class="ghost" id="sel-none">清空</button>
 </div>
@@ -52,6 +55,7 @@
 <footer>
   <span id="count"></span>
   <span id="progress"></span>
+  <button id="uninstall" class="danger" disabled>卸载所选</button>
   <button id="install" disabled>安装所选</button>
 </footer>
 <script>
@@ -68,6 +72,7 @@ const listEl = document.getElementById('list');
 const countEl = document.getElementById('count');
 const progressEl = document.getElementById('progress');
 const installBtn = document.getElementById('install');
+const uninstallBtn = document.getElementById('uninstall');
 const detectPill = document.getElementById('detect-pill');
 
 async function refreshDetect() {
@@ -151,6 +156,7 @@ function updateCount() {
   const a = catalog.filter(p => !p.is_team && selected.has(p.name)).length;
   countEl.textContent = `已选：${t} 个专家团、${a} 个单专家`;
   installBtn.disabled = selected.size === 0;
+  uninstallBtn.disabled = selected.size === 0;
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -166,7 +172,30 @@ document.getElementById('sel-video').onclick = () => {
   selected = new Set(VIDEO_PRESELECT.filter(n => catalog.some(p => p.name === n)));
   render();
 };
+document.getElementById('sel-all').onclick = () => {
+  catalog.filter(matches).forEach(p => selected.add(p.name));
+  render();
+};
+document.getElementById('sel-invert').onclick = () => {
+  catalog.filter(matches).forEach(p => {
+    selected.has(p.name) ? selected.delete(p.name) : selected.add(p.name);
+  });
+  render();
+};
 document.getElementById('sel-none').onclick = () => { selected.clear(); render(); };
+
+uninstallBtn.onclick = async () => {
+  if (!selected.size) return;
+  uninstallBtn.disabled = true;
+  progressEl.textContent = '卸载中…';
+  try {
+    const n = await invoke('uninstall', { names: [...selected], configDir });
+    progressEl.textContent = `🗑 已卸载 ${n} 个插件（注册表同步清理）。重启 WorkBuddy 生效。`;
+  } catch (e) {
+    progressEl.textContent = '❌ 卸载失败：' + e;
+  }
+  uninstallBtn.disabled = selected.size === 0;
+};
 
 installBtn.onclick = async () => {
   if (!selected.size) return;
@@ -179,6 +208,7 @@ installBtn.onclick = async () => {
     progressEl.textContent = '❌ 安装失败：' + e;
   }
   installBtn.disabled = selected.size === 0;
+  uninstallBtn.disabled = selected.size === 0;
 };
 
 (async () => {

@@ -341,6 +341,71 @@ fn install(names: Vec<String>, config_dir: Option<String>) -> Result<usize, Stri
     install_selected(&selected, &experts, &dir)
 }
 
+
+fn uninstall_selected(names: &[String], config_dir: &Path) -> Result<usize, String> {
+    let plugins_dir = config_dir.join("plugins/marketplaces/my-experts/plugins");
+    let cache_root = config_dir.join("plugins/cache/my-experts");
+    let mut removed = 0usize;
+    for name in names {
+        let target = plugins_dir.join(name);
+        if target.exists() {
+            fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+            removed += 1;
+        }
+        let cache_target = cache_root.join(name);
+        if cache_target.exists() {
+            fs::remove_dir_all(&cache_target).map_err(|e| e.to_string())?;
+        }
+    }
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    // installed_plugins.json：删掉 <name>@my-experts 条目
+    let inst_path = config_dir.join("plugins/installed_plugins.json");
+    if inst_path.is_file() {
+        backup(&inst_path);
+        let mut inst = read_json(&inst_path).unwrap_or_else(|| json!({"version": 2, "plugins": {}}));
+        if let Some(map) = inst.as_object_mut()
+            .and_then(|o| o.get_mut("plugins"))
+            .and_then(|v| v.as_object_mut())
+        {
+            for name in names {
+                map.remove(&format!("{}@my-experts", name));
+            }
+        }
+        fs::write(&inst_path, serde_json::to_string_pretty(&inst).unwrap()).map_err(|e| e.to_string())?;
+    }
+
+    // marketplace manifest：删掉所选条目（外来条目保留）
+    let manifest_path = config_dir.join("plugins/marketplaces/my-experts/.codebuddy-plugin/marketplace.json");
+    if manifest_path.is_file() {
+        backup(&manifest_path);
+        let mut market = read_json(&manifest_path).unwrap_or_else(|| json!({"name": "my-experts", "plugins": []}));
+        if let Some(entries) = market.get("plugins").and_then(|p| p.as_array()).cloned() {
+            let kept: Vec<Value> = entries
+                .into_iter()
+                .filter(|e| {
+                    e.get("name").and_then(|n| n.as_str())
+                        .map(|n| !names.contains(&n.to_string()))
+                        .unwrap_or(true)
+                })
+                .collect();
+            market.as_object_mut().unwrap().insert("plugins".to_string(), json!(kept));
+            fs::write(&manifest_path, serde_json::to_string_pretty(&market).unwrap()).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+fn uninstall(names: Vec<String>, config_dir: Option<String>) -> Result<usize, String> {
+    let dir = config_dir
+        .map(|d| expand_home(&d))
+        .unwrap_or_else(|| expand_home("~/.workbuddy"));
+    uninstall_selected(&names, &dir)
+}
+
 #[tauri::command]
 fn pick_config_dir() -> Option<String> {
     None // 前端用 dialog plugin 替代；占位以保持 invoke 面稳定
@@ -374,6 +439,18 @@ fn cli_main() -> i32 {
         .filter(|p| names.contains(&p.name))
         .collect();
     let dir = dir.unwrap_or_else(|| expand_home("~/.workbuddy"));
+    if args.iter().any(|a| a == "--uninstall") {
+        return match uninstall_selected(&names, &dir) {
+            Ok(n) => {
+                println!("uninstalled {} plugins from {}", n, dir.join("plugins/marketplaces/my-experts").display());
+                0
+            }
+            Err(e) => {
+                eprintln!("uninstall failed: {}", e);
+                1
+            }
+        };
+    }
     match install_selected(&selected, &experts, &dir) {
         Ok(n) => {
             println!("installed {} plugins into {}", n, dir.join("plugins/marketplaces/my-experts").display());
@@ -393,7 +470,7 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![detect, catalog, plugin_icon, install, pick_config_dir])
+        .invoke_handler(tauri::generate_handler![detect, catalog, plugin_icon, install, uninstall, pick_config_dir])
         .run(tauri::generate_context!())
         .expect("error while running AgentBuddy");
 }

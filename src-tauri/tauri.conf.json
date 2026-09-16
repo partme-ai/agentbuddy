@@ -10,19 +10,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": {
-      "windows": [
-        "nsis"
-      ],
-      "macOS": [
-        "dmg",
-        "app"
-      ],
-      "linux": [
-        "appimage",
-        "deb"
-      ]
-    },
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "appimage",
+      "deb"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

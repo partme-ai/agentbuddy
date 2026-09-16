@@ -25,9 +25,14 @@ jobs:
           repository: partme-ai/workbuddy-agent-experts
           path: workbuddy-agent-experts
           # public repo: default GITHUB_TOKEN only (org policy rejects the PAT)
-      - name: Link the experts resource tree
+      - name: Link the experts resource tree (POSIX)
+        if: runner.os != 'Windows'
         shell: bash
-        run: ln -sfn "$PWD/workbuddy-agent-experts/experts" "$PWD/agentbuddy/experts"
+        run: rm -rf "$PWD/agentbuddy/experts" && ln -sfn "$PWD/workbuddy-agent-experts/experts" "$PWD/agentbuddy/experts"
+      - name: Copy the experts resource tree (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rm -rf "$PWD/agentbuddy/experts" && cp -R "$PWD/workbuddy-agent-experts/experts" "$PWD/agentbuddy/experts"
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
